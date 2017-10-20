@@ -75,7 +75,9 @@ class LoggerObject(object):
     #TURNKEY METHOD
     def StartLogging(self):
         print "resyncing DB"
-        #self.updateDB()
+        self.updateDB() #this update is potentially long
+        ------------------todo
+        self.updateDB() #so we do another quick one to catch new messages
         print "starting streaming"
         self.streamToDB()
 
