@@ -2,9 +2,10 @@ import requests, json, Queue, dateutil.parser, pprint
 import MySQLdb as mdb
 
 # CONFIGS
-GITTER_USER_TOKEN = open('token').readline() #could just paste it here in a string
+GITTER_USER_TOKEN = open('token.txt').readline() #could just paste it here in a string
 GITTER_ROOM_NAME = "gitterHQ/sandbox"#"Matt Benic"
-MESSAGE_FETCH_BATCH = 10 # batch size, max=100
+# GITTER_ROOM_NAME = "Matt Benic"
+MESSAGE_FETCH_BATCH = 3 # batch size, max=100
 
 MYSQL_DATABASE_HOST = 'localhost'
 MYSQL_DATABASE_NAME = 'logdb'
@@ -37,13 +38,13 @@ class LoggerObject(object):
     def __init__(self, token, room_name):
 
         try:
-            self.last_stored_message_date = int(open('last_date').readline())
+            self.last_stored_message_date = int(open('last_date.txt').readline())
         except:
             print "Impossible to determine last stored message, to dump" \
                   "all the logs please do an 'echo \"0\" > last_date' before" \
                   "running the program. This is a safety measure."
+            quit()
 
-        self.track_file = open('last_date', 'w')
         self.room_name = room_name
 
         self.header = {
@@ -66,25 +67,35 @@ class LoggerObject(object):
 
         #currently we just don't write immediately
         #TODO: write immediately but also check edits and update if necessary
-        self.buffer = Queue()
+        self.buffer = Queue.Queue()
 
         self._initDB()
 
 
     #TURNKEY METHOD
     def StartLogging(self):
-        self.updateDB()
+        print "resyncing DB"
+        #self.updateDB()
+        print "starting streaming"
         self.streamToDB()
 
     # POPULAR FUNCTIONS
     def updateDB(self): #updates db with past messages
         missed_messages = self.getMessagesAfter(self.last_stored_message_date)
-        #TODO optimize this, currently it doesn't run on server so whatever
+        #TODO optimize this, currently it doesn't run much on rem server so whatever
         for message in missed_messages:
             self.storeMessage(message)
 
     def streamToDB(self): #keeps streaming and updating db
         stream = self.getRoomStreamer()
+        for blob in stream.iter_lines():
+            print blob
+            print '---'
+            data = json.loads(blob, 'utf-8')
+            print 'data', data
+            # message = self.parseMessage(data)
+            # pprint.pprint(message)
+
 
     #END POPULAR
 
@@ -125,8 +136,10 @@ class LoggerObject(object):
                     print message
                     all_messages.append(message)
                 else:
+                    all_messages.reverse()
                     return all_messages
             if len(batch) <= 0:
+                all_messages.reverse()
                 return all_messages #message not found
             current_backtrack = batch[-1]['id']
 
@@ -151,38 +164,31 @@ class LoggerObject(object):
             quit()
 
     def storeMessage(self, message): #TODO variant that stores many at once
-        self.cur.execute("INSERT INTO logs(date,id,text,html,user_id,user_name,user_display,urls)"
-                         "VALUES({},'{}','{}','{}','{}','{}','{}','{}')".format(
-                                                                    message['date'],
-                                                                    message['id'],
-                                                                    message['text'],
-                                                                    message['html'],
-                                                                    message['user_id'],
-                                                                    message['user_name'],
-                                                                    message['user_display'],
-                                                                    message['urls']))
+
+        print "STORING============="
+        pprint.pprint(message)
+
+        self.cur.execute(
+                "INSERT IGNORE  INTO logs(date,id,text,html,user_id,user_name,user_display,urls)"
+                "VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
+                (message['date'], message['id'], message['text'], message['html'], message['user_id'],
+                 message['user_name'], message['user_display'], str(message['urls'])))
         self.con.commit()
         self.last_stored_message_date = message['date']
-        self.track_file.write(str(self.last_stored_message_date))
+        #open('last_date.txt', 'w').write(str(self.last_stored_message_date)) #this sucks
 
 
     #stop
     def stopSystems(self):
         self.con.close()  # DB con
-        #TODO stream
+        #TODO end stream
 
 
-gitter = LoggerObject(GITTER_USER_TOKEN, GITTER_ROOM_NAME)
+gitter = LoggerObject(GITTER_USER_TOKEN, GITTER_ROOM_NAME).StartLogging()
 # gitter.getMessagesAfter(20171019184513)
 
 #pprint.pprint(gitter.getLastMessages())
 
 quit()
-
-stream = gitter.getRoomStreamer()
-
-for val in stream:
-    print str(val)
-
 
 print 'finished'
